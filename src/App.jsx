@@ -1,4 +1,9 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { createClient } from "@supabase/supabase-js"
+
+const SUPABASE_URL = "https://srlvdlhozsbzlyvoudqq.supabase.co"
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNybHZkbGhvenNiemx5dm91ZHFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NTM4NzksImV4cCI6MjA5MTMyOTg3OX0.J5vkJ4beSGDWBj4yS869jFoKVptpiusWtJ8CeOl_h4U"
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 const products = [
   { id: 1, name: "Kurma Ajwa", price: 85000, emoji: "🫘", stock: 50, category: "Makanan", desc: "Kurma premium pilihan" },
@@ -17,11 +22,21 @@ const fmt = (n) => "Rp " + Math.round(n).toLocaleString("id-ID")
 function LoginScreen({ onLogin, onGoRegister }) {
   const [form, setForm] = useState({ email: "", password: "" })
   const [error, setError] = useState("")
+  const [loading, setLoading] = useState(false)
   const handle = (e) => setForm({ ...form, [e.target.name]: e.target.value })
-  const submit = () => {
+
+  const submit = async () => {
     if (!form.email || !form.password) { setError("Email dan password wajib diisi."); return }
     if (!form.email.includes("@")) { setError("Format email tidak valid."); return }
-    onLogin({ email: form.email, name: form.email.split("@")[0] })
+    setLoading(true)
+    setError("")
+    const { data, error: err } = await supabase.auth.signInWithPassword({
+      email: form.email,
+      password: form.password,
+    })
+    setLoading(false)
+    if (err) { setError(err.message); return }
+    onLogin({ email: data.user.email, name: data.user.email.split("@")[0], id: data.user.id })
   }
 
   return (
@@ -47,8 +62,9 @@ function LoginScreen({ onLogin, onGoRegister }) {
             </div>
           </div>
           {error && <p className="text-red-400 text-xs mb-4">⚠ {error}</p>}
-          <button onClick={submit} className="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-950 font-bold py-3 rounded-xl transition-all text-sm mb-4">
-            Masuk →
+          <button onClick={submit} disabled={loading}
+            className="w-full bg-yellow-400 hover:bg-yellow-300 disabled:bg-gray-700 disabled:text-gray-500 text-gray-950 font-bold py-3 rounded-xl transition-all text-sm mb-4">
+            {loading ? "Memproses..." : "Masuk →"}
           </button>
           <div className="bg-gray-800 rounded-xl p-3 mb-4">
             <p className="text-xs text-gray-500 italic text-center">"Sesungguhnya Allah menyukai orang yang jujur." — HR. Tirmidzi</p>
@@ -66,13 +82,24 @@ function LoginScreen({ onLogin, onGoRegister }) {
 function RegisterScreen({ onRegister, onGoLogin }) {
   const [form, setForm] = useState({ name: "", email: "", store: "", password: "", confirm: "" })
   const [error, setError] = useState("")
+  const [loading, setLoading] = useState(false)
   const handle = (e) => setForm({ ...form, [e.target.name]: e.target.value })
-  const submit = () => {
+
+  const submit = async () => {
     if (!form.name || !form.email || !form.store || !form.password || !form.confirm) { setError("Semua field wajib diisi."); return }
     if (!form.email.includes("@")) { setError("Format email tidak valid."); return }
     if (form.password.length < 6) { setError("Password minimal 6 karakter."); return }
     if (form.password !== form.confirm) { setError("Password tidak cocok."); return }
-    onRegister({ name: form.name, email: form.email, store: form.store })
+    setLoading(true)
+    setError("")
+    const { data, error: err } = await supabase.auth.signUp({
+      email: form.email,
+      password: form.password,
+      options: { data: { name: form.name, store: form.store } }
+    })
+    setLoading(false)
+    if (err) { setError(err.message); return }
+    onRegister({ name: form.name, email: form.email, store: form.store, id: data.user?.id })
   }
 
   return (
@@ -101,8 +128,9 @@ function RegisterScreen({ onRegister, onGoLogin }) {
             ))}
           </div>
           {error && <p className="text-red-400 text-xs mb-4">⚠ {error}</p>}
-          <button onClick={submit} className="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-950 font-bold py-3 rounded-xl transition-all text-sm mb-4">
-            Daftar Sekarang →
+          <button onClick={submit} disabled={loading}
+            className="w-full bg-yellow-400 hover:bg-yellow-300 disabled:bg-gray-700 disabled:text-gray-500 text-gray-950 font-bold py-3 rounded-xl transition-all text-sm mb-4">
+            {loading ? "Memproses..." : "Daftar Sekarang →"}
           </button>
           <p className="text-center text-xs text-gray-500">Sudah punya akun?{" "}
             <button onClick={onGoLogin} className="text-yellow-400 hover:underline font-medium">Masuk di sini</button>
@@ -242,6 +270,7 @@ function PaymentScreen({ cart, onBack, onSuccess, user }) {
   const [method, setMethod] = useState("tunai")
   const [buyerName, setBuyerName] = useState("")
   const [buyerEmail, setBuyerEmail] = useState("")
+  const [loading, setLoading] = useState(false)
   const subtotal = cart.reduce((s, i) => s + i.price * i.qty, 0)
   const zakat = subtotal * 0.025
   const total = subtotal + zakat
@@ -249,6 +278,23 @@ function PaymentScreen({ cart, onBack, onSuccess, user }) {
 
   const canSubmit = buyerName && buyerEmail &&
     (method === "transfer" || (method === "tunai" && bayar && kembalian >= 0))
+
+  const handleSelesai = async () => {
+    setLoading(true)
+    const { error } = await supabase.from("transaksi").insert({
+      user_id: user.id,
+      buyer_name: buyerName,
+      buyer_email: buyerEmail,
+      method,
+      items: cart.map(i => ({ id: i.id, name: i.name, qty: i.qty, price: i.price, emoji: i.emoji })),
+      subtotal,
+      zakat,
+      total,
+    })
+    setLoading(false)
+    if (error) { alert("Gagal simpan transaksi: " + error.message); return }
+    onSuccess({ name: buyerName, email: buyerEmail, method })
+  }
 
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">
@@ -262,8 +308,6 @@ function PaymentScreen({ cart, onBack, onSuccess, user }) {
       </header>
 
       <div className="max-w-2xl mx-auto w-full p-6 space-y-4">
-
-        {/* Data Pembeli */}
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
           <h3 className="font-bold text-sm text-gray-400 uppercase tracking-widest mb-3">Data Pembeli</h3>
           <div className="space-y-3">
@@ -280,7 +324,6 @@ function PaymentScreen({ cart, onBack, onSuccess, user }) {
           </div>
         </div>
 
-        {/* Ringkasan */}
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
           <h3 className="font-bold text-sm text-gray-400 uppercase tracking-widest mb-3">Ringkasan Pesanan</h3>
           {cart.map(item => (
@@ -298,14 +341,12 @@ function PaymentScreen({ cart, onBack, onSuccess, user }) {
           </div>
         </div>
 
-        {/* AI Audit */}
         <div className="bg-gray-900 border border-green-800 rounded-2xl p-4">
           <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">🤖 AI Audit Result</p>
           <p className="text-green-400 text-sm font-medium">✅ Semua produk terverifikasi HALAL. Transaksi sesuai prinsip Syariah.</p>
           <p className="text-gray-600 text-xs mt-1">Tidak ada pelanggaran akad terdeteksi • Audit selesai</p>
         </div>
 
-        {/* Metode */}
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
           <h3 className="font-bold text-sm text-gray-400 uppercase tracking-widest mb-3">Metode Pembayaran</h3>
           <div className="grid grid-cols-2 gap-3 mb-4">
@@ -343,10 +384,9 @@ function PaymentScreen({ cart, onBack, onSuccess, user }) {
           )}
         </div>
 
-        <button onClick={() => onSuccess({ name: buyerName, email: buyerEmail, method })}
-          disabled={!canSubmit}
+        <button onClick={handleSelesai} disabled={!canSubmit || loading}
           className="w-full bg-yellow-400 disabled:bg-gray-700 disabled:text-gray-500 hover:bg-yellow-300 text-gray-950 font-bold py-4 rounded-2xl text-lg transition-all hover:scale-[1.01]">
-          ✓ Selesaikan Transaksi
+          {loading ? "Menyimpan..." : "✓ Selesaikan Transaksi"}
         </button>
       </div>
     </div>
@@ -416,9 +456,22 @@ export default function App() {
   const [cart, setCart] = useState([])
   const [buyer, setBuyer] = useState(null)
 
+  // Cek session yang masih aktif
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setUser({ email: session.user.email, name: session.user.email.split("@")[0], id: session.user.id })
+        setScreen("welcome")
+      }
+    })
+  }, [])
+
   const handleLogin = (u) => { setUser(u); setScreen("welcome") }
   const handleRegister = (u) => { setUser(u); setScreen("welcome") }
-  const handleLogout = () => { setUser(null); setCart([]); setScreen("login") }
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    setUser(null); setCart([]); setScreen("login")
+  }
   const handleSuccess = (b) => { setBuyer(b); setScreen("success") }
   const handleReset = () => { setCart([]); setScreen("welcome") }
 
